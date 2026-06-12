@@ -29,7 +29,7 @@ Les poids des modèles, les datasets et les sorties d'entraînement ne sont pas 
    pip install -r requirements.txt
    ```
 2. Le dataset SH17 est récupéré automatiquement via `kagglehub` (cellule de configuration du notebook). Aucun téléchargement manuel n'est nécessaire.
-3. Ouvrir et exécuter `notebooks/01_pipeline_SH17.ipynb` dans l'ordre. Les graines aléatoires sont fixées (`seed = 42`) pour la reproductibilité du split et de l'entraînement.
+3. Ouvrir et exécuter `pipeline_SH17.ipynb` dans l'ordre. Les graines aléatoires sont fixées (`seed = 42`) pour la reproductibilité du split et de l'entraînement.
 
 Note : les cellules d'entraînement et de recherche d'hyperparamètres sont coûteuses (GPU recommandé). Elles peuvent être sautées si les poids sont déjà présents ; les cellules d'évaluation rechargent les modèles depuis le disque.
 
