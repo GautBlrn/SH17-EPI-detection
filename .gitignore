@@ -1,0 +1,33 @@
+# === Poids de modèles (lourds, ne pas committer) ===
+*.pt
+*.onnx
+weights/
+
+# === Datasets et splits générés ===
+SH17_yolo/
+SH17_yolo_3cls/
+*.cache
+.cache/
+
+# === Sorties d'entraînement et d'inférence Ultralytics ===
+runs/
+inference_out/
+traitement_image/inference_out/
+
+# === Vidéos et médias volumineux ===
+videos/
+*.mp4
+*.avi
+*.mov
+
+# === Artefacts Python / Jupyter ===
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+
+# === Divers ===
+.DS_Store
+*.log
