@@ -31,9 +31,9 @@ Le pipeline complet couvre : réorganisation du dataset (train / val / test), ex
     └── Projet_TraitementImage.pdf# ébauche de sujet initiale (historique de cadrage)
 ```
 
-`README.md` et `CLAUDE.md` restent à la racine (convention GitHub / Claude Code). Les poids des
-modèles, les datasets et les sorties d'entraînement (`SH17_yolo/`, `models/`, `runs/`) ne sont pas
-versionnés (voir `.gitignore`) en raison de leur taille et restent à la racine du dépôt.
+`README.md` reste à la racine (convention GitHub).
+Les poids des modèles, les datasets et les sorties d'entraînement (`SH17_yolo/`, `models/`, `runs/`)
+ne sont pas versionnés (voir `.gitignore`) en raison de leur taille et restent à la racine du dépôt.
 
 ## Reproduction du pipeline
 
