@@ -11,7 +11,6 @@ Le pipeline complet couvre : réorganisation du dataset (train / val / test), ex
 ```
 .
 ├── README.md
-├── CLAUDE.md
 ├── .gitignore
 ├── Applications/
 │   ├── pipeline_SH17.ipynb       # pipeline reproductible de bout en bout
