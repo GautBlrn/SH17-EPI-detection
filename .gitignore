@@ -6,6 +6,7 @@ weights/
 # === Datasets et splits générés ===
 SH17_yolo/
 SH17_yolo_3cls/
+SH17_yolo_degraded/
 *.cache
 .cache/
 
@@ -31,3 +32,10 @@ env/
 # === Divers ===
 .DS_Store
 *.log
+
+# === Historique local du dashboard (données d'exécution, pas du code) ===
+Applications/app/historique.csv
+
+# === Autres ===
+.claude
+CLAUDE.md
