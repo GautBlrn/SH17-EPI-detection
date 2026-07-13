@@ -375,6 +375,19 @@ def process_video(model, in_path, out_path, conf, alert_persist=5,
 
     cap.release()
     writer.release()
+
+    import shutil
+    import subprocess
+
+    if shutil.which("ffmpeg"):
+        h264_path = out_path.replace(".mp4", "_h264.mp4")
+        cmd = ["ffmpeg", "-y", "-i", out_path,
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-crf", "23", "-preset", "veryfast",
+            "-movflags", "+faststart", h264_path]
+        if subprocess.run(cmd, capture_output=True).returncode == 0:
+            out_path = h264_path
+
     agg_info = {
         "conforme": agg_non_conforme_frames == 0,
         "tetes_nues": agg_bare_max,
