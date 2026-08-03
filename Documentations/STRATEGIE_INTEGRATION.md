@@ -47,25 +47,25 @@ Déploiement recommandé sur un chantier pilote unique, de taille moyenne, avec 
 
 | | Positif | Négatif |
 |---|---|---|
-| **Interne** | **Forces** : modèle temps réel (yolo11l, latence mesurée en Axe A), rappel priorisé sur le casque (EPI le plus critique), pipeline reproductible et documenté (seed fixée, EDA justifiée) | **Faiblesses** : rappel insuffisant sur `safety-vest` pour une alerte ferme, robustesse mesurée en conditions dégradées **insuffisante** (mAP@50-95 -0.133 en absolu, soit environ -30 % en relatif, sur un sous-ensemble faible luminosité + occlusion synthétique — cf. Axe A extension), pas de tracking multi-frame (une alerte par frame, pas de persistance par individu) |
+| **Interne** | **Forces** : modèle temps réel (yolo11l, latence mesurée en Axe A), rappel priorisé sur le casque (EPI le plus critique), pipeline reproductible et documenté (seed fixée, EDA justifiée) | **Faiblesses** : rappel insuffisant sur `safety-vest` pour une alerte ferme, robustesse mesurée en conditions dégradées **insuffisante** (mAP@50-95 -0.133 en absolu, soit environ -30 % en relatif, sur un sous-ensemble faible luminosité + occlusion synthétique, cf. Axe A extension), pas de tracking multi-frame (une alerte par frame, pas de persistance par individu) |
 | **Externe** | **Opportunités** : cadre réglementaire favorable (obligation EPI déjà en vigueur, facilite la justification du déploiement), dataset et outils open source réutilisables pour étendre à d'autres EPI ou d'autres sites | **Menaces** : acceptabilité sociale du contrôle vidéo, dépendance à la qualité/position des caméras existantes sur chantier, dérive des conditions réelles par rapport au dataset d'entraînement (SH17 n'est pas exclusivement du BTP) |
 
 ## 3. Feuille de route de déploiement
 
-### Phase 1 — Test (0-2 mois)
+### Phase 1 : test (0-2 mois)
 
 - Déploiement sur le chantier pilote, une seule zone couverte, alerte casque uniquement (gilet en mode indicatif non affiché à l'opérateur pour ne pas générer de bruit).
 - Validation manuelle systématique des alertes par le responsable sécurité pendant les 2 premières semaines (taux de faux positifs/négatifs mesuré en conditions réelles, à comparer aux métriques du jeu de test SH17).
 - Indicateur de succès : taux de faux positifs perçu comme acceptable par l'équipe terrain (seuil à définir avec le client, ex. < 1 fausse alerte validée par heure de fonctionnement), et absence de non-détection sur les cas rapportés a posteriori par l'équipe sécurité.
 
-### Phase 2 — Généralisation (2-5 mois)
+### Phase 2 : généralisation (2-5 mois)
 
 - Extension à l'ensemble des zones à risque du chantier pilote, puis à un second chantier de profil différent (taille, luminosité, type de travaux).
 - Réintégration du gilet comme indice affiché aux opérateurs, avec suivi du taux de rappel réel avant de basculer en alerte ferme.
 - Mise en place du tableau de bord de suivi (taux de conformité, alertes/jour, par zone) pour objectiver la tendance dans le temps et informer les formations ciblées.
 - Indicateur de succès : couverture de 100 % des zones à risque identifiées, tableau de bord utilisé effectivement par le responsable sécurité (adoption mesurée par la fréquence de consultation).
 
-### Phase 3 — Optimisation (5-9 mois)
+### Phase 3 : optimisation (5-9 mois)
 
 - Ré-entraînement du modèle avec les données terrain collectées (conditions réelles de chantier, corrections des faux positifs/négatifs remontés), pour réduire l'écart entre performance sur SH17 et performance en conditions réelles.
 - Étude de la piste tracking multi-frame (persistance de l'alerte par individu plutôt que par frame isolée) pour réduire le bruit et fiabiliser la remontée.

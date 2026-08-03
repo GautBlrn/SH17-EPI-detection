@@ -1,6 +1,6 @@
 ---
-title: "Détection automatique du port des EPI sur chantier — SH17"
-subtitle: "Bloc 2 — Projet 1 — Rapport technique"
+title: "Détection automatique du port des EPI sur chantier, SH17"
+subtitle: "Bloc 2, Projet 1 : rapport technique"
 author: "Gautier"
 date: "Juillet 2026"
 ---
@@ -25,8 +25,8 @@ dans les processus métiers existants (supervision, sécurité, gestion des chan
 
 Le projet s'appuie sur le dataset **SH17** (8 099 images, 75 994 instances, 17 classes) et sur la
 famille de modèles **YOLO11** (détection en un seul passage), comparée à un transformeur de détection
-(**RT-DETR**). L'ensemble du pipeline — nettoyage, exploration, entraînement, évaluation, stratégie
-d'intégration — est documenté et reproductible dans `Applications/pipeline_SH17.ipynb`, dont ce
+(**RT-DETR**). L'ensemble du pipeline (nettoyage, exploration, entraînement, évaluation, stratégie
+d'intégration) est documenté et reproductible dans `Applications/pipeline_SH17.ipynb`, dont ce
 rapport reprend et structure les résultats selon le plan attendu. Une contrainte a pesé sur la fin du
 projet : la perte d'accès à un serveur GPU dédié, qui a nécessité de poursuivre l'entraînement du
 modèle final en local (poste personnel) et de documenter honnêtement les conséquences sur la
@@ -49,7 +49,7 @@ l'entraînement.
 ## Nettoyage
 
 - **Images floues** : détection par variance du Laplacien (seuil recalibré sur la distribution
-  réelle des scores de netteté du dataset), filtrage appliqué uniquement sur le train — le test et
+  réelle des scores de netteté du dataset), filtrage appliqué uniquement sur le train : le test et
   la validation restent représentatifs des conditions réelles rencontrées en production.
 - **Annotations invalides** : boîtes englobantes hors image, dimensions nulles, doublons (détectés
   par IoU) supprimés ou corrigés.
@@ -65,7 +65,7 @@ l'entraînement.
   l'image, et les classes EPI critiques (`helmet`, `safety-vest`) sont à la fois rares et souvent
   petites.
 - **Débruitage et recadrage manuel** : volontairement écartés (justification détaillée section 1.4
-  du notebook) — un pré-traitement non justifié par l'exploration est jugé plus risqué que bénéfique.
+  du notebook), un pré-traitement non justifié par l'exploration étant jugé plus risqué que bénéfique.
 - **Augmentation** : mosaic natif YOLO (expose le modèle à plusieurs échelles) et transformations
   albumentations ciblées (section 1.5 du notebook).
 
@@ -75,7 +75,7 @@ l'entraînement.
 
 Le ratio classe majoritaire / minoritaire dépasse 100:1 (`hands` contre `face-guard`). Les classes
 utiles à la conformité EPI sont précisément parmi les plus rares : `helmet` (927 instances au
-train), `safety-vest` (530), alors que `head` est très fréquente (11 985) — cette asymétrie
+train), `safety-vest` (530), alors que `head` est très fréquente (11 985), cette asymétrie
 (beaucoup de têtes, peu de casques annotés) fragilise structurellement la détection des casques et
 motive l'axe d'analyse dédié (Axe B, voir plus bas).
 
@@ -156,7 +156,7 @@ Contrairement au tableau comparatif principal (figé, serveur H100 disparu), cet
 modèle retenu.
 
 **Empreinte énergétique** (proxy `nvidia-smi`, mesure de puissance instantanée du GPU pendant
-l'inférence, moyennée sur 30 images à 768 px — méthode approximative documentée comme telle dans le
+l'inférence, moyennée sur 30 images à 768 px, méthode approximative documentée comme telle dans le
 notebook) :
 
 | Modèle | GFLOPs | Puissance moy. (W) | Énergie (J/img) | gCO2/img (estimation) |
@@ -174,7 +174,7 @@ principale. `rtdetr-l` est la configuration la plus gourmande, cohérent avec so
 plus élevé.
 
 **Robustesse** (sous-ensemble de 200 images de test dégradées : faible luminosité + occlusion
-synthétique, modèle retenu uniquement — les architectures "smoke" sous-entraînées ne permettent pas
+synthétique, modèle retenu uniquement : les architectures "smoke" sous-entraînées ne permettent pas
 une comparaison de delta significative) :
 
 | | mAP@50 | mAP@50-95 |
@@ -194,7 +194,7 @@ prioriser avant un déploiement en extérieur non contrôlé.
 ## Focus 3 classes de conformité (Axe B)
 
 **Hypothèse** : en retirant les 14 classes annexes, le modèle ne dilue plus sa capacité entre
-`person`/`hands` et les 3 classes de conformité ; attente réaliste (posée avant expérience) — `head`
+`person`/`hands` et les 3 classes de conformité ; attente réaliste (posée avant expérience) : `head`
 a déjà peu de marge (0.730 mAP@50-95), `helmet` distinctif devrait progresser modérément,
 `safety-vest` reste le plus dur car son déséquilibre interne (head 8211 contre vest 372, environ
 22:1) persiste même après remapping.
@@ -217,7 +217,7 @@ l'écart peut venir du nombre d'époques, pas seulement du nombre de classes.
 moyenne leurs performances (-0.037 de mAP@50-95), avec un recul net sur `helmet` (-17 % en relatif)
 et `head` (-5 %). `safety-vest` est le seul cas où la restriction aide légèrement (+0.010 sur le
 mAP@50-95, +0.062 sur le mAP@50) : la précision progresse (0.587 → 0.617) mais le rappel recule
-(0.606 → 0.541) — moins de détections, mais plus fiables. Trois mécanismes expliquent ce bilan
+(0.606 → 0.541), soit moins de détections mais plus fiables. Trois mécanismes expliquent ce bilan
 globalement négatif :
 
 1. **Perte du partage de features inter-classes** (mécanisme principal, explique le recul de
@@ -231,7 +231,7 @@ globalement négatif :
    classe difficile, sans compenser la perte de rappel.
 
 **Recommandation actionnable** : pour un détecteur d'EPI fondé sur YOLO, conserver les classes
-anatomiques (`person`, `head`, `face`) comme contexte est préférable à un entraînement restreint —
+anatomiques (`person`, `head`, `face`) comme contexte est préférable à un entraînement restreint :
 le gain marginal et incertain sur `safety-vest` ne compense pas la perte sur `helmet`/`head`, les
 deux classes qui fondent l'alerte ferme de l'application.
 
@@ -259,7 +259,7 @@ deux classes qui fondent l'alerte ferme de l'application.
 | foot | 514 | 0.540 | 0.342 | 0.419 | 0.362 | 0.183 |
 | safety-suit | 164 | 0.302 | 0.432 | 0.355 | 0.280 | 0.176 |
 
-**mAP@50 global : 0.667 — mAP@50-95 global : 0.441.**
+**mAP@50 global : 0.667, mAP@50-95 global : 0.441.**
 
 La performance par classe est fortement corrélée à la fréquence d'entraînement, avec deux exceptions
 notables : `helmet` (652 instances) surperforme sa fréquence grâce à sa distinctivité visuelle
@@ -271,7 +271,7 @@ casque (privilégier le rappel) plutôt que de le laisser au seuil qui maximiser
 
 ## Limites documentées
 
-- `safety-vest` (mAP@50-95 0.307) : rappel insuffisant pour fonder une alerte ferme — reste un
+- `safety-vest` (mAP@50-95 0.307) : rappel insuffisant pour fonder une alerte ferme, reste un
   indice indicatif dans l'application.
 - Pas de tracking multi-frame : chaque alerte est évaluée frame par frame, sans persistance par
   individu (piste d'amélioration identifiée en phase 3 de la feuille de route de déploiement).
