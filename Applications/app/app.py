@@ -32,6 +32,11 @@ import plotly.express as px
 import streamlit as st
 from ultralytics import YOLO
 
+# La règle de conformité vit dans un seul fichier, importé aussi par
+# pipeline_SH17.ipynb et couvert par Applications/tests/. Elle était dupliquée
+# ici et dans le notebook jusqu'au 7 septembre 2026.
+from conformite import CLASSES, EPI_IDS, assess_compliance
+
 # ============================================================
 # Paramètres figés (non exposés à l'utilisateur)
 # ============================================================
@@ -44,15 +49,6 @@ ZONES_PREDEFINIES = [
     "Zone A - Terrassement", "Zone B - Gros oeuvre",
     "Zone C - Second oeuvre", "Zone D - Stockage/Livraison", "Autre",
 ]
-
-CLASSES = [
-    "person", "ear", "ear-mufs", "face", "face-guard", "face-mask",
-    "foot", "tool", "glasses", "gloves", "helmet", "hands",
-    "head", "medical-suit", "shoes", "safety-suit", "safety-vest",
-]
-PERSON_ID, HELMET_ID, HEAD_ID, VEST_ID = 0, 10, 12, 16
-# Affichage restreint aux classes utiles à la conformité (désencombre l'image)
-EPI_IDS = [PERSON_ID, HELMET_ID, HEAD_ID, VEST_ID]
 
 
 # ============================================================
@@ -193,43 +189,8 @@ def t(key):
 
 
 # ============================================================
-# Logique de conformité (identique au notebook)
+# Affichage du verdict (la règle elle-même est dans conformite.py)
 # ============================================================
-def helmet_covers_head(head_box, helmet_box, thresh=0.3):
-    """Le casque coiffe-t-il cette tête ? Fraction du casque incluse dans la
-    tête, avec garde-fou : le casque doit être dans la moitié haute du crâne."""
-    hx1, hy1, hx2, hy2 = head_box
-    cx1, cy1, cx2, cy2 = helmet_box
-    ix1, iy1 = max(hx1, cx1), max(hy1, cy1)
-    ix2, iy2 = min(hx2, cx2), min(hy2, cy2)
-    inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
-    helmet_area = (cx2 - cx1) * (cy2 - cy1)
-    if helmet_area == 0:
-        return False
-    if (cy1 + cy2) / 2 > (hy1 + hy2) / 2:
-        return False
-    return (inter / helmet_area) >= thresh
-
-
-def assess_compliance(result):
-    """Renvoie un dict : conforme, nb de têtes nues (alerte ferme),
-    indice gilet manquant (indicatif), et les comptages bruts personne/gilet
-    (utiles pour l'historique et le tableau de bord)."""
-    if result.boxes is None or len(result.boxes) == 0:
-        return {"conforme": True, "tetes_nues": 0, "indice_gilet_manquant": 0,
-                "n_person": 0, "n_vest": 0}
-    boxes = result.boxes.xyxy.cpu().numpy()
-    cls = result.boxes.cls.cpu().numpy().astype(int)
-    heads = [b for b, c in zip(boxes, cls) if c == HEAD_ID]
-    helmets = [b for b, c in zip(boxes, cls) if c == HELMET_ID]
-    bare = sum(1 for h in heads if not any(helmet_covers_head(h, hm) for hm in helmets))
-    n_person = int((cls == PERSON_ID).sum())
-    n_vest = int((cls == VEST_ID).sum())
-    return {"conforme": bare == 0, "tetes_nues": bare,
-            "indice_gilet_manquant": max(0, n_person - n_vest),
-            "n_person": n_person, "n_vest": n_vest}
-
-
 def draw_banner(frame_bgr, info, lang="fr"):
     """Incruste un bandeau (vert/rouge) en haut de l'image (modifie en place).
 
