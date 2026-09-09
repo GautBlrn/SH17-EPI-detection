@@ -1,0 +1,10 @@
+# Paquets systeme installes par Streamlit Cloud avant pip (apt-get).
+#
+# ultralytics depend en dur d'opencv-python (variante non headless) :
+#   Requires-Dist: opencv-python!=4.13.0.90,>=4.6.0
+# Epingler opencv-python-headless dans requirements.txt ne l'empeche pas, les
+# deux paquets ecrivent le meme module cv2 et le non headless l'emporte. Il
+# charge libGL.so.1 a l'import, absente de l'image du conteneur, d'ou
+# ImportError: libGL.so.1. Les deux bibliotheques ci-dessous la fournissent.
+libgl1
+libglib2.0-0

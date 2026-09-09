@@ -12,14 +12,14 @@
 #    "No space left on device". Les numéros sont ceux du poste de développement
 #    (torch 2.13.0, torchvision 0.28.0), pour que le déploiement exécute la même
 #    pile que les mesures du rapport.
-# 2. opencv-python-headless au lieu d'opencv-python. Le paquet non headless
-#    réclame libGL, absente du conteneur, et lève ImportError: libGL.so.1.
+# 2. opencv n'est pas listé ici. ultralytics dépend en dur d'opencv-python
+#    (variante non headless), donc épingler opencv-python-headless ne servait
+#    qu'à installer les deux, qui écrivent le même module cv2 et se marchent
+#    dessus. La bibliothèque système libGL que réclame opencv-python est
+#    fournie par le fichier packages.txt, à côté de celui-ci.
 # 3. Rien d'autre ne change.
 #
-# La version de Python de l'app doit être fixée dans les réglages avancés de
-# Streamlit Cloud, au moment de la création de l'app : elle ne se change pas
-# après coup, et la valeur par défaut du conteneur n'a pas forcément de roue
-# CPU publiée pour ces deux paquets.
+# Testé sur le Python 3.14 du conteneur, celui du poste de développement.
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 
@@ -28,7 +28,6 @@ torchvision==0.28.0+cpu
 
 streamlit>=1.30
 ultralytics>=8.3
-opencv-python-headless>=4.8
 numpy>=1.24
 pandas>=2.0
 pillow>=10.0
