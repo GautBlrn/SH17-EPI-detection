@@ -1,20 +1,30 @@
 # Dépendances de la démonstration Streamlit, version DÉPLOIEMENT.
 #
 # Trois écarts avec le requirements.txt local, et un seul motif à chaque fois :
-# ce qui marche sur un poste ne marche pas dans le conteneur de Streamlit Cloud.
+# ce qui marche sur un poste équipé d'une carte graphique ne rentre pas dans le
+# conteneur de Streamlit Cloud (disque limité, pas de GPU).
 #
-# 1. torch en roues CPU. `pip install ultralytics` tire par défaut la variante
-#    CUDA sur Linux, environ 2,5 Go, et le build échoue avant la fin. L'index
-#    supplémentaire ci-dessous force les roues CPU, qui sont ce dont on a besoin
-#    puisque l'hébergement n'a pas de carte graphique.
+# 1. torch et torchvision sont épinglés en variante "+cpu". Le suffixe local
+#    "+cpu" n'existe que sur l'index PyTorch déclaré ci-dessous : il force donc
+#    pip à y aller. Un simple --extra-index-url ne suffit pas : pip interroge
+#    les deux index, garde la version la plus haute, et celle de PyPI tire les
+#    paquets nvidia-* et triton (plusieurs Go) jusqu'au
+#    "No space left on device". Les numéros sont ceux du poste de développement
+#    (torch 2.13.0, torchvision 0.28.0), pour que le déploiement exécute la même
+#    pile que les mesures du rapport.
 # 2. opencv-python-headless au lieu d'opencv-python. Le paquet non headless
-#    réclame libGL, absente du conteneur, et lève `ImportError: libGL.so.1`.
+#    réclame libGL, absente du conteneur, et lève ImportError: libGL.so.1.
 # 3. Rien d'autre ne change.
+#
+# La version de Python de l'app doit être fixée dans les réglages avancés de
+# Streamlit Cloud, au moment de la création de l'app : elle ne se change pas
+# après coup, et la valeur par défaut du conteneur n'a pas forcément de roue
+# CPU publiée pour ces deux paquets.
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-torch
-torchvision
+torch==2.13.0+cpu
+torchvision==0.28.0+cpu
 
 streamlit>=1.30
 ultralytics>=8.3
