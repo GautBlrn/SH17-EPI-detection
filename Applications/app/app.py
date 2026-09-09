@@ -40,11 +40,12 @@ from conformite import CLASSES, EPI_IDS, assess_compliance
 # ============================================================
 # Paramètres figés (non exposés à l'utilisateur)
 # ============================================================
-MODEL_PATH = "weights/best.pt"   # modèle retenu (yolo11l tuné)
+_DOSSIER_APP = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(_DOSSIER_APP, "weights", "best.pt")   # modèle retenu (yolo11l tuné)
 IMGSZ_IMG = 768                  # résolution pour les images (qualité)
 IMGSZ_VID = 768                  # résolution pour la vidéo (plus rapide sur CPU)
 MAX_FRAMES = 750                 # plafond démo (~30 s à 25 fps)
-HISTORIQUE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "historique.csv")
+HISTORIQUE_PATH = os.path.join(_DOSSIER_APP, "historique.csv")
 ZONES_PREDEFINIES = [
     "Zone A - Terrassement", "Zone B - Gros oeuvre",
     "Zone C - Second oeuvre", "Zone D - Stockage/Livraison", "Autre",
@@ -259,6 +260,51 @@ def zone_picker(key):
 # ============================================================
 # Chargement du modèle (mis en cache : une seule fois)
 # ============================================================
+def _url_modele() -> str:
+    """URL d'ou telecharger `best.pt` quand il n'est pas sur le disque.
+
+    Lue dans `MODEL_URL`, variable d'environnement ou secret Streamlit. Vide en
+    local, ou le fichier est deja la : la fonction n'y sert alors jamais.
+    """
+    url = os.environ.get("MODEL_URL", "")
+    if url:
+        return url
+    try:
+        return st.secrets.get("MODEL_URL", "")
+    except Exception:
+        # Pas de fichier de secrets : c'est le cas normal en local.
+        return ""
+
+
+@st.cache_resource(show_spinner="Telechargement du modele, une seule fois...")
+def assurer_modele(chemin: str) -> str:
+    """Garantit la presence du poids, en le telechargeant si besoin.
+
+    Ne fait rien quand le fichier est deja la, ce qui est le cas en local et
+    dans l'archive de remise. Sur un hebergement qui clone le depot sans les
+    poids, elle va le chercher a l'URL configuree. Sans URL configuree, elle
+    laisse le fichier absent : l'appelant affiche « Modele introuvable », le
+    comportement documente reste donc inchange.
+
+    Le telechargement passe par un `.part` renomme a la fin : une coupure ne
+    laisse pas un `best.pt` tronque que le cache prendrait ensuite pour valide.
+    """
+    if os.path.exists(chemin):
+        return chemin
+
+    url = _url_modele()
+    if not url:
+        return chemin
+
+    import urllib.request
+
+    os.makedirs(os.path.dirname(chemin), exist_ok=True)
+    temporaire = chemin + ".part"
+    urllib.request.urlretrieve(url, temporaire)
+    os.replace(temporaire, chemin)
+    return chemin
+
+
 @st.cache_resource(show_spinner="Chargement du modèle...")
 def load_model(path):
     return YOLO(path)
@@ -487,6 +533,7 @@ mode = st.radio(t("mode_label"), mode_keys,
 
 # === Vérification du modèle (uniquement nécessaire hors tableau de bord) ===
 if mode in ("image", "video"):
+    assurer_modele(MODEL_PATH)
     if not os.path.exists(MODEL_PATH):
         st.error(t("model_missing").format(path=MODEL_PATH))
         st.stop()
