@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import torch
 from ultralytics import YOLO
 
 # La règle de conformité vit dans un seul fichier, importé aussi par
@@ -47,8 +48,12 @@ IMGSZ_VID = 768                  # résolution pour la vidéo (même modèle, m�
 # Budget vidéo : yolo11l en 768 coûte ~0,8 s par frame sur 2 cœurs CPU (mesuré
 # le 15/10/2026), l'ordre de grandeur de Streamlit Cloud. Analyser toutes les
 # frames d'une vidéo de 30 s prenait donc plus de dix minutes.
-ANALYSE_FPS = 3                  # frames analysées par seconde de vidéo
-MAX_INFERENCES = 60              # plafond d'inférences par vidéo (~1 min sur CPU)
+# Sur carte graphique (17 ms par frame, mesuré le même jour), aucune raison de
+# se restreindre : toutes les frames écrites sont analysées.
+ANALYSE_FPS = 3                  # CPU : frames analysées par seconde de vidéo
+MAX_INFERENCES = 60              # CPU : plafond par vidéo, soit ses 20 premières s
+ANALYSE_FPS_GPU = 30             # GPU : chaque frame écrite (FPS_SORTIE_MAX)
+MAX_INFERENCES_GPU = 9000        # GPU : 5 min de vidéo à 30 fps
 LARGEUR_MAX_VID = 960            # la sortie est réduite au-delà (annotation + encodage)
 ALERTE_PERSIST_S = 1.0           # durée de non-conformité avant le bandeau rouge
 FPS_SORTIE_MAX = 30              # cadence max de la vidéo produite (60 fps -> 30)
@@ -321,16 +326,16 @@ def load_model(path):
 # Traitement vidéo : annote frame par frame, sauvegarde un .mp4
 # ============================================================
 # Pour rester supportable sur CPU :
-#   - on n'analyse que ANALYSE_FPS frames par seconde de vidéo, et au plus
-#     MAX_INFERENCES sur toute la vidéo (le pas s'allonge sur les vidéos
-#     longues, qui restent couvertes jusqu'au bout) ;
+#   - sur CPU, on n'analyse que ANALYSE_FPS frames par seconde de vidéo, et
+#     la vidéo s'arrête après MAX_INFERENCES analyses. Étirer ces analyses sur
+#     toute la vidéo laissait les boîtes plusieurs secondes en retard ;
+#   - sur GPU, toutes les frames écrites sont analysées ;
 #   - toutes les frames sont écrites (au plus FPS_SORTIE_MAX par seconde), avec
 #     les boîtes et le bandeau de la dernière analyse : la vidéo reste fluide,
 #     les boîtes suivent avec au plus 1 / ANALYSE_FPS s de retard ;
 #   - les frames non écrites sont seulement « grab » (pas de conversion d'image).
 # ============================================================
-def process_video(model, in_path, out_path, conf, max_inferences=MAX_INFERENCES,
-                  progress=None, lang="fr"):
+def process_video(model, in_path, out_path, conf, progress=None, lang="fr"):
     cap = cv2.VideoCapture(in_path)
     if not cap.isOpened():
         raise RuntimeError("Impossible d'ouvrir la vidéo.")
@@ -339,10 +344,13 @@ def process_video(model, in_path, out_path, conf, max_inferences=MAX_INFERENCES,
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
 
+    if torch.cuda.is_available():
+        analyse_fps, max_inferences = ANALYSE_FPS_GPU, MAX_INFERENCES_GPU
+    else:
+        analyse_fps, max_inferences = ANALYSE_FPS, MAX_INFERENCES
+
     pas_ecriture = max(1, round(fps / FPS_SORTIE_MAX))
-    stride = max(1, round(fps / ANALYSE_FPS))
-    if total:
-        stride = max(stride, -(-total // max_inferences))   # division plafond
+    stride = max(1, round(fps / analyse_fps))
     # une frame analysée doit aussi être une frame écrite
     stride = -(-stride // pas_ecriture) * pas_ecriture
     alert_persist = max(1, round(ALERTE_PERSIST_S * fps / stride))
@@ -363,6 +371,7 @@ def process_video(model, in_path, out_path, conf, max_inferences=MAX_INFERENCES,
 
     streak = 0
     read_i = inferred = 0
+    tronquee = False
     dernier_res = dernier_bandeau = None
     # Agrégats pour l'historique (le pire état rencontré sur la vidéo)
     agg_bare_max = agg_n_person_max = agg_n_vest_max = 0
@@ -377,8 +386,7 @@ def process_video(model, in_path, out_path, conf, max_inferences=MAX_INFERENCES,
 
         a_analyser = read_i % stride == 0
         if a_analyser and inferred >= max_inferences:
-            # garde-fou : le nombre de frames annoncé par le conteneur est
-            # parfois faux, le plafond d'inférences reste tenu
+            tronquee = True
             break
 
         ok, frame = cap.read()
@@ -401,7 +409,8 @@ def process_video(model, in_path, out_path, conf, max_inferences=MAX_INFERENCES,
                                "tetes_nues": info["tetes_nues"]}
             inferred += 1
             if progress is not None:
-                fait = read_i / total if total else inferred / max_inferences
+                fin = min(total, max_inferences * stride) if total else 0
+                fait = read_i / fin if fin else inferred / max_inferences
                 progress.progress(min(1.0, fait))
 
         annotated = dernier_res.plot(img=frame, line_width=1, conf=False,
@@ -432,7 +441,8 @@ def process_video(model, in_path, out_path, conf, max_inferences=MAX_INFERENCES,
         "n_vest": agg_n_vest_max,
         "indice_gilet_manquant": max(0, agg_n_person_max - agg_n_vest_max),
     }
-    return out_path, read_i, inferred, agg_info
+    duree_analysee = read_i / fps if tronquee else None
+    return out_path, read_i, inferred, agg_info, duree_analysee
 
 
 # ============================================================
@@ -615,11 +625,14 @@ elif mode == "video":
         if st.button(t("run_button"), type="primary"):
             prog = st.progress(0.0)
             with st.spinner(t("processing")):
-                out_path, n_total, n_inf, agg_info = process_video(
+                out_path, n_total, n_inf, agg_info, duree_analysee = process_video(
                     model, tin.name, out_path, conf,
                     progress=prog, lang=lang)
             log_event(zone, "vidéo", agg_info)
             st.success(f"{n_total} frames lues ({n_inf} analysées).")
+            if duree_analysee is not None:
+                st.info(f"Vidéo longue : seules les {duree_analysee:.0f} premières "
+                        "secondes sont analysées (hébergement sans carte graphique).")
 
             # Sans ffmpeg, la vidéo reste en MPEG-4 Part 2 (mp4v), que les
             # navigateurs ne lisent pas : st.video afficherait un lecteur vide.
