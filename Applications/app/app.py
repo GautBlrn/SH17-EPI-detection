@@ -51,6 +51,7 @@ ANALYSE_FPS = 3                  # frames analysées par seconde de vidéo
 MAX_INFERENCES = 60              # plafond d'inférences par vidéo (~1 min sur CPU)
 LARGEUR_MAX_VID = 960            # la sortie est réduite au-delà (annotation + encodage)
 ALERTE_PERSIST_S = 1.0           # durée de non-conformité avant le bandeau rouge
+FPS_SORTIE_MAX = 30              # cadence max de la vidéo produite (60 fps -> 30)
 HISTORIQUE_PATH = os.path.join(_DOSSIER_APP, "historique.csv")
 ZONES_PREDEFINIES = [
     "Zone A - Terrassement", "Zone B - Gros oeuvre",
@@ -323,10 +324,10 @@ def load_model(path):
 #   - on n'analyse que ANALYSE_FPS frames par seconde de vidéo, et au plus
 #     MAX_INFERENCES sur toute la vidéo (le pas s'allonge sur les vidéos
 #     longues, qui restent couvertes jusqu'au bout) ;
-#   - seules les frames analysées sont écrites, à fps / pas : la sortie garde
-#     la durée réelle. Réécrire la dernière frame annotée à chaque frame sautée
-#     donnait la même image figée, pour un encodage bien plus long ;
-#   - les frames sautées sont seulement « grab » (pas de conversion d'image).
+#   - toutes les frames sont écrites (au plus FPS_SORTIE_MAX par seconde), avec
+#     les boîtes et le bandeau de la dernière analyse : la vidéo reste fluide,
+#     les boîtes suivent avec au plus 1 / ANALYSE_FPS s de retard ;
+#   - les frames non écrites sont seulement « grab » (pas de conversion d'image).
 # ============================================================
 def process_video(model, in_path, out_path, conf, max_inferences=MAX_INFERENCES,
                   progress=None, lang="fr"):
@@ -338,18 +339,21 @@ def process_video(model, in_path, out_path, conf, max_inferences=MAX_INFERENCES,
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
 
+    pas_ecriture = max(1, round(fps / FPS_SORTIE_MAX))
     stride = max(1, round(fps / ANALYSE_FPS))
     if total:
         stride = max(stride, -(-total // max_inferences))   # division plafond
-    fps_sortie = fps / stride
-    alert_persist = max(1, round(ALERTE_PERSIST_S * fps_sortie))
+    # une frame analysée doit aussi être une frame écrite
+    stride = -(-stride // pas_ecriture) * pas_ecriture
+    alert_persist = max(1, round(ALERTE_PERSIST_S * fps / stride))
 
     echelle = min(1.0, LARGEUR_MAX_VID / w)
     taille = (int(w * echelle) // 2 * 2, int(h * echelle) // 2 * 2)   # pair pour yuv420p
 
     writer = None
     for fourcc in ("avc1", "mp4v", "XVID"):
-        wr = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*fourcc), fps_sortie, taille)
+        wr = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*fourcc),
+                             fps / pas_ecriture, taille)
         if wr.isOpened():
             writer = wr
             break
@@ -359,16 +363,23 @@ def process_video(model, in_path, out_path, conf, max_inferences=MAX_INFERENCES,
 
     streak = 0
     read_i = inferred = 0
+    dernier_res = dernier_bandeau = None
     # Agrégats pour l'historique (le pire état rencontré sur la vidéo)
     agg_bare_max = agg_n_person_max = agg_n_vest_max = 0
     agg_non_conforme_frames = 0
     while True:
-        if read_i % stride:
-            # frame sautée : avancer dans le flux sans convertir l'image
+        if read_i % pas_ecriture:
+            # frame ni analysée ni écrite : avancer sans convertir l'image
             if not cap.grab():
                 break
             read_i += 1
             continue
+
+        a_analyser = read_i % stride == 0
+        if a_analyser and inferred >= max_inferences:
+            # garde-fou : le nombre de frames annoncé par le conteneur est
+            # parfois faux, le plafond d'inférences reste tenu
+            break
 
         ok, frame = cap.read()
         if not ok:
@@ -376,29 +387,28 @@ def process_video(model, in_path, out_path, conf, max_inferences=MAX_INFERENCES,
         if echelle < 1.0:
             frame = cv2.resize(frame, taille, interpolation=cv2.INTER_AREA)
 
-        res = model.predict(frame, imgsz=IMGSZ_VID, conf=conf,
-                            classes=EPI_IDS, verbose=False)[0]
-        annotated = res.plot(line_width=1, conf=False, font_size=0.4)
-        info = assess_compliance(res)
-        agg_bare_max = max(agg_bare_max, info["tetes_nues"])
-        agg_n_person_max = max(agg_n_person_max, info["n_person"])
-        agg_n_vest_max = max(agg_n_vest_max, info["n_vest"])
-        if not info["conforme"]:
-            agg_non_conforme_frames += 1
-        streak = 0 if info["conforme"] else streak + 1
-        draw_banner(annotated, {"conforme": streak < alert_persist,
-                                "tetes_nues": info["tetes_nues"]}, lang=lang)
+        if a_analyser:
+            dernier_res = model.predict(frame, imgsz=IMGSZ_VID, conf=conf,
+                                        classes=EPI_IDS, verbose=False)[0]
+            info = assess_compliance(dernier_res)
+            agg_bare_max = max(agg_bare_max, info["tetes_nues"])
+            agg_n_person_max = max(agg_n_person_max, info["n_person"])
+            agg_n_vest_max = max(agg_n_vest_max, info["n_vest"])
+            if not info["conforme"]:
+                agg_non_conforme_frames += 1
+            streak = 0 if info["conforme"] else streak + 1
+            dernier_bandeau = {"conforme": streak < alert_persist,
+                               "tetes_nues": info["tetes_nues"]}
+            inferred += 1
+            if progress is not None:
+                fait = read_i / total if total else inferred / max_inferences
+                progress.progress(min(1.0, fait))
+
+        annotated = dernier_res.plot(img=frame, line_width=1, conf=False,
+                                     font_size=0.4)
+        draw_banner(annotated, dernier_bandeau, lang=lang)
         writer.write(annotated)
         read_i += 1
-        inferred += 1
-
-        if progress is not None:
-            fait = read_i / total if total else inferred / max_inferences
-            progress.progress(min(1.0, fait))
-        if inferred >= max_inferences:
-            # garde-fou : le nombre de frames annoncé par le conteneur est
-            # parfois faux, le plafond d'inférences reste tenu
-            break
 
     cap.release()
     writer.release()
@@ -611,9 +621,11 @@ elif mode == "video":
             log_event(zone, "vidéo", agg_info)
             st.success(f"{n_total} frames lues ({n_inf} analysées).")
 
-            try:
+            # Sans ffmpeg, la vidéo reste en MPEG-4 Part 2 (mp4v), que les
+            # navigateurs ne lisent pas : st.video afficherait un lecteur vide.
+            if out_path.endswith("_h264.mp4"):
                 st.video(out_path)
-            except Exception:
+            else:
                 st.info("Lecture inline indisponible (codec). Utilisez le bouton ci-dessous.")
             with open(out_path, "rb") as f:
                 st.download_button(t("download_button"), f,
