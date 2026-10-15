@@ -43,8 +43,14 @@ from conformite import CLASSES, EPI_IDS, assess_compliance
 _DOSSIER_APP = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(_DOSSIER_APP, "weights", "best.pt")   # modèle retenu (yolo11l tuné)
 IMGSZ_IMG = 768                  # résolution pour les images (qualité)
-IMGSZ_VID = 768                  # résolution pour la vidéo (plus rapide sur CPU)
-MAX_FRAMES = 750                 # plafond démo (~30 s à 25 fps)
+IMGSZ_VID = 768                  # résolution pour la vidéo (même modèle, même échelle)
+# Budget vidéo : yolo11l en 768 coûte ~0,8 s par frame sur 2 cœurs CPU (mesuré
+# le 15/10/2026), l'ordre de grandeur de Streamlit Cloud. Analyser toutes les
+# frames d'une vidéo de 30 s prenait donc plus de dix minutes.
+ANALYSE_FPS = 3                  # frames analysées par seconde de vidéo
+MAX_INFERENCES = 60              # plafond d'inférences par vidéo (~1 min sur CPU)
+LARGEUR_MAX_VID = 960            # la sortie est réduite au-delà (annotation + encodage)
+ALERTE_PERSIST_S = 1.0           # durée de non-conformité avant le bandeau rouge
 HISTORIQUE_PATH = os.path.join(_DOSSIER_APP, "historique.csv")
 ZONES_PREDEFINIES = [
     "Zone A - Terrassement", "Zone B - Gros oeuvre",
@@ -313,13 +319,17 @@ def load_model(path):
 # ============================================================
 # Traitement vidéo : annote frame par frame, sauvegarde un .mp4
 # ============================================================
-# Pour rester fluide sur CPU sans saccade :
-#   - inférence en 768 + classes filtrées (plus rapide)
-#   - sur grosse vidéo, on saute des frames (stride) MAIS on les
-#     reduplique à l'écriture, donc la sortie garde son fps d'origine.
+# Pour rester supportable sur CPU :
+#   - on n'analyse que ANALYSE_FPS frames par seconde de vidéo, et au plus
+#     MAX_INFERENCES sur toute la vidéo (le pas s'allonge sur les vidéos
+#     longues, qui restent couvertes jusqu'au bout) ;
+#   - seules les frames analysées sont écrites, à fps / pas : la sortie garde
+#     la durée réelle. Réécrire la dernière frame annotée à chaque frame sautée
+#     donnait la même image figée, pour un encodage bien plus long ;
+#   - les frames sautées sont seulement « grab » (pas de conversion d'image).
 # ============================================================
-def process_video(model, in_path, out_path, conf, alert_persist=5,
-                  max_frames=None, progress=None, lang="fr"):
+def process_video(model, in_path, out_path, conf, max_inferences=MAX_INFERENCES,
+                  progress=None, lang="fr"):
     cap = cv2.VideoCapture(in_path)
     if not cap.isOpened():
         raise RuntimeError("Impossible d'ouvrir la vidéo.")
@@ -328,13 +338,18 @@ def process_video(model, in_path, out_path, conf, alert_persist=5,
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
 
-    # stride auto : vidéo courte -> tout traiter ; longue -> en sauter
-    stride = 1 if total <= 900 else max(2, total // MAX_FRAMES)
+    stride = max(1, round(fps / ANALYSE_FPS))
+    if total:
+        stride = max(stride, -(-total // max_inferences))   # division plafond
+    fps_sortie = fps / stride
+    alert_persist = max(1, round(ALERTE_PERSIST_S * fps_sortie))
 
-    # writer au fps PLEIN (pas fps/stride) -> sortie à vitesse réelle
+    echelle = min(1.0, LARGEUR_MAX_VID / w)
+    taille = (int(w * echelle) // 2 * 2, int(h * echelle) // 2 * 2)   # pair pour yuv420p
+
     writer = None
     for fourcc in ("avc1", "mp4v", "XVID"):
-        wr = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*fourcc), fps, (w, h))
+        wr = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*fourcc), fps_sortie, taille)
         if wr.isOpened():
             writer = wr
             break
@@ -344,40 +359,45 @@ def process_video(model, in_path, out_path, conf, alert_persist=5,
 
     streak = 0
     read_i = inferred = 0
-    last_annotated = None
     # Agrégats pour l'historique (le pire état rencontré sur la vidéo)
     agg_bare_max = agg_n_person_max = agg_n_vest_max = 0
     agg_non_conforme_frames = 0
     while True:
+        if read_i % stride:
+            # frame sautée : avancer dans le flux sans convertir l'image
+            if not cap.grab():
+                break
+            read_i += 1
+            continue
+
         ok, frame = cap.read()
         if not ok:
             break
+        if echelle < 1.0:
+            frame = cv2.resize(frame, taille, interpolation=cv2.INTER_AREA)
 
-        if read_i % stride == 0:
-            # frame analysée
-            res = model.predict(frame, imgsz=IMGSZ_VID, conf=conf,
-                                classes=EPI_IDS, verbose=False)[0]
-            annotated = res.plot(line_width=1, conf=False, font_size=0.4)
-            info = assess_compliance(res)
-            agg_bare_max = max(agg_bare_max, info["tetes_nues"])
-            agg_n_person_max = max(agg_n_person_max, info["n_person"])
-            agg_n_vest_max = max(agg_n_vest_max, info["n_vest"])
-            if not info["conforme"]:
-                agg_non_conforme_frames += 1
-            streak = 0 if info["conforme"] else streak + 1
-            draw_banner(annotated, {"conforme": streak < alert_persist,
-                                    "tetes_nues": info["tetes_nues"]}, lang=lang)
-            last_annotated = annotated
-            inferred += 1
-        else:
-            # frame sautée : on réécrit la dernière annotée (fluidité conservée)
-            annotated = last_annotated if last_annotated is not None else frame
-
+        res = model.predict(frame, imgsz=IMGSZ_VID, conf=conf,
+                            classes=EPI_IDS, verbose=False)[0]
+        annotated = res.plot(line_width=1, conf=False, font_size=0.4)
+        info = assess_compliance(res)
+        agg_bare_max = max(agg_bare_max, info["tetes_nues"])
+        agg_n_person_max = max(agg_n_person_max, info["n_person"])
+        agg_n_vest_max = max(agg_n_vest_max, info["n_vest"])
+        if not info["conforme"]:
+            agg_non_conforme_frames += 1
+        streak = 0 if info["conforme"] else streak + 1
+        draw_banner(annotated, {"conforme": streak < alert_persist,
+                                "tetes_nues": info["tetes_nues"]}, lang=lang)
         writer.write(annotated)
         read_i += 1
-        if progress is not None and total:
-            progress.progress(min(1.0, read_i / total))
-        if max_frames and inferred >= max_frames:
+        inferred += 1
+
+        if progress is not None:
+            fait = read_i / total if total else inferred / max_inferences
+            progress.progress(min(1.0, fait))
+        if inferred >= max_inferences:
+            # garde-fou : le nombre de frames annoncé par le conteneur est
+            # parfois faux, le plafond d'inférences reste tenu
             break
 
     cap.release()
@@ -587,9 +607,9 @@ elif mode == "video":
             with st.spinner(t("processing")):
                 out_path, n_total, n_inf, agg_info = process_video(
                     model, tin.name, out_path, conf,
-                    max_frames=MAX_FRAMES, progress=prog, lang=lang)
+                    progress=prog, lang=lang)
             log_event(zone, "vidéo", agg_info)
-            st.success(f"{n_total} frames écrites ({n_inf} analysées).")
+            st.success(f"{n_total} frames lues ({n_inf} analysées).")
 
             try:
                 st.video(out_path)
